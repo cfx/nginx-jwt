@@ -2,6 +2,7 @@ local jwt = require "resty.jwt"
 local cjson = require "cjson"
 local basexx = require "basexx"
 local secret = os.getenv("JWT_SECRET")
+local query_param_name = os.getenv("JWT_QUERY_PARAM_NAME")
 
 assert(secret ~= nil, "Environment variable JWT_SECRET not set")
 
@@ -22,19 +23,17 @@ end
 
 local M = {}
 
-function M.auth(claim_specs)
-    -- require Authorization request header
+function M.get_token()
     local auth_header = ngx.var.http_Authorization
 
-    if auth_header == nil then
-        ngx.log(ngx.WARN, "No Authorization header")
-        ngx.exit(ngx.HTTP_UNAUTHORIZED)
+    if auth_header then
+       ngx.log(ngx.INFO, "Authorization: " .. auth_header)
+       token = M.extract_header_token(auth_header)
+    else
+       local query_params = ngx.req.get_uri_args()
+       token = M.extract_query_param_token(query_params)
     end
 
-    ngx.log(ngx.INFO, "Authorization: " .. auth_header)
-
-    -- require Bearer token
-    local _, _, token = string.find(auth_header, "Bearer%s+(.+)")
 
     if token == nil then
         ngx.log(ngx.WARN, "Missing token")
@@ -42,6 +41,24 @@ function M.auth(claim_specs)
     end
 
     ngx.log(ngx.INFO, "Token: " .. token)
+
+    return token
+end
+
+function M.extract_header_token(auth_header)
+    local _, _, token = string.find(auth_header, "Bearer%s+(.+)")
+    return token
+end
+
+function M.extract_query_param_token(query_params)
+    for k, v in pairs(query_params) do
+        if k == query_param_name then return v end
+    end
+    return nil
+end
+
+function M.auth(claim_specs)
+    local token = M.get_token()
 
     -- require valid JWT
     local jwt_obj = jwt:verify(secret, token, 0)
